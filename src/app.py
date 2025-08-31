@@ -8,8 +8,8 @@ from flask_swagger import swagger
 from flask_cors import CORS
 from utils import APIException, generate_sitemap
 from admin import setup_admin
-from models import db, User,People,Planet
-#from models import Person
+from models import db, User,People,Planet,Favourites_people,Favourites_Planet
+from sqlalchemy import select
 
 app = Flask(__name__)
 app.url_map.strict_slashes = False
@@ -47,14 +47,34 @@ def handle_hello():
     response_body = {
         "msg": "these are all the users:",
         "users": list(results),
-        "planets_fav":[],
-        "people_fav":[],
+       
 
     }
 
     return jsonify(response_body), 200
 
+@app.route('/user/<int:user_id>', methods=['GET'])
+def get_userid(user_id):
+    one_user = User.query.filter_by(id = user_id).first()
+  
 
+    return jsonify(one_user.serialize()), 200
+
+@app.route("/user/favorites", methods=["GET"])
+def get_user_favorites():
+    user_id = request.args.get("user_id", type=int)
+
+    fav_people = db.session.execute(
+        select(Favourites_people).where(Favourites_people.user_id == user_id)).scalars().all()
+
+    fav_planets = db.session.execute(
+        select(Favourites_Planet).where(Favourites_Planet.user_id == user_id)).scalars().all()
+
+    fav_results = (
+        [f.serialize() | {"type": "character"} for f in fav_people] +
+        [f.serialize() | {"type": "planet"} for f in fav_planets]
+    )
+    return jsonify(fav_results), 200
 
    # People Route------------- 
 
@@ -81,9 +101,7 @@ def handle_person(people_id):
 def add_people():
 
     person_body =request.get_json()
-        
-   
-  
+    
     person = People( 
         name=person_body['name'],
         eye_color=person_body['eye_color'],
@@ -112,6 +130,58 @@ def delete_person(people_id):
         
     }), 200
 
+ # Favorite People---------------------------------------------------------------
+@app.route('/user/favorite/people', methods=['GET'])
+def fav_people_list():
+    fav_people = Favourites_Planet.query.all()
+    favpe_results = map(lambda fav_people : fav_people.serialize() ,fav_people)
+
+    people_Favs_response_body = {
+        "msg": "these are all the Favorites characters:",
+        "people": list(favpe_results),
+    }
+    return jsonify(people_Favs_response_body), 200
+
+@app.route("/user/favorite/people/<int:people_id>", methods=["POST"])
+def add_favorite_people(people_id):
+    user_id = int(3)
+
+    person = db.session.get(People, people_id)
+    if not person:
+        raise APIException("Planet not found", status_code=404)
+
+    exists = db.session.execute(
+        select(Favourites_people).where(
+            Favourites_people.user_id == user_id,
+            Favourites_people.people_id == people_id
+        )
+    ).scalar_one_or_none()
+
+    if exists:
+        return jsonify({"msg": "It was already in favorites"}), 200
+
+    fav = Favourites_people(user_id=user_id, people_id=people_id)
+    db.session.add(fav)
+    db.session.commit()
+    return jsonify(fav.serialize() | {"type": "people"}), 201
+
+@app.route("/user/favorite/people/<int:people_id>", methods=["DELETE"])
+def remove_favorite_people(people_id):
+    user_id = int(3)
+
+    fav = db.session.execute(
+        select(Favourites_people).where(
+             Favourites_people.user_id == user_id,
+            Favourites_people.people_id == people_id
+        )
+    ).scalar_one_or_none()
+
+    if not fav:
+        raise APIException("That person wasn't in your favorites", status_code=404)
+
+    db.session.delete(fav)
+    db.session.commit()
+    return jsonify({"msg": "Person removed from favorites"}), 200
 
 
 # Planets Route------------- 
@@ -123,7 +193,7 @@ def handle_planets():
     planets_results = map(lambda planet : planet.serialize() ,all_planets)
 
     planets_response_body = {
-        "msg": "these are all the people:",
+        "msg": "these are all the planets:",
         "planets": list(planets_results),
     }
     return jsonify(planets_response_body), 200
@@ -158,7 +228,77 @@ def add_planets():
     return jsonify(addplanet_response_body), 200
 
 
+@app.route('/planets/<int:planet_id>', methods=['DELETE'])
+def delete_planet(planet_id):
+    planet = Planet.query.filter_by(id = planet_id).first()
+  
+    db.session.delete(planet)
+    db.session.commit()
+    return jsonify({
+        "msg": " Deleted succesfully",
+        "planet" : planet.serialize()
+        
+    }), 200
+
+
+    # Favorite Planets---------------------------------------------------------------
+
+@app.route('/user/favorite/planet', methods=['GET'])
+def fav_planets_list():
+    fav_planets = Favourites_Planet.query.all()
+    favpl_results = map(lambda fav_planet : fav_planet.serialize() ,fav_planets)
+
+    planets_Favs_response_body = {
+        "msg": "these are all the Favorites planets:",
+        "planets": list(favpl_results),
+    }
+    return jsonify(planets_Favs_response_body), 200
+
+@app.route("/user/favorite/planet/<int:planet_id>", methods=["POST"])
+def add_favorite_planet(planet_id):
+    user_id = int(3)
+
+    planet = db.session.get(Planet, planet_id)
+    if not planet:
+        raise APIException("Planet not found", status_code=404)
+
+    exists = db.session.execute(
+        select(Favourites_Planet).where(
+            Favourites_Planet.user_id == user_id,
+            Favourites_Planet.planet_id == planet_id
+        )
+    ).scalar_one_or_none()
+
+    if exists:
+        return jsonify({"msg": "It was already in favorites"}), 200
+
+    fav = Favourites_Planet(user_id=user_id, planet_id=planet_id)
+    db.session.add(fav)
+    db.session.commit()
+    return jsonify(fav.serialize() | {"type": "planet"}), 201
+
+@app.route("/user/favorite/planet/<int:planet_id>", methods=["DELETE"])
+def remove_favorite_planet(planet_id):
+    user_id = int(3)
+
+    fav = db.session.execute(
+        select(Favourites_Planet).where(
+            Favourites_Planet.user_id == user_id,
+            Favourites_Planet.planet_id == planet_id
+        )
+    ).scalar_one_or_none()
+
+    if not fav:
+        raise APIException("That planet wasn't in your favorites", status_code=404)
+
+    db.session.delete(fav)
+    db.session.commit()
+    return jsonify({"msg": "Planet removed from favorites"}), 200
+
+
 # this only runs if `$ python src/app.py` is executed
 if __name__ == '__main__':
     PORT = int(os.environ.get('PORT', 3000))
     app.run(host='0.0.0.0', port=PORT, debug=False)
+
+
